@@ -388,17 +388,16 @@
     <h2>Connexion</h2>
     <div class="form-group">
       <label>Matricule (identifiant)</label>
-      <input type="text" id="login-user" placeholder="5 chiffres" value="00001" maxlength="5" inputmode="numeric">
+      <input type="text" id="login-user" placeholder="5 chiffres" maxlength="5" inputmode="numeric">
     </div>
     <div class="form-group">
       <label>Mot de passe</label>
-      <input type="password" id="login-pass" placeholder="Votre mot de passe" value="admin123">
+      <input type="password" id="login-pass" placeholder="Votre mot de passe">
     </div>
     <div id="login-error" style="color:var(--danger);font-size:13px;margin-bottom:12px;display:none;"></div>
     <button class="btn btn-primary btn-block" style="margin-top:8px;padding:12px" onclick="doLogin()">Se connecter</button>
     <p style="text-align:center;margin-top:16px;font-size:13px"><button onclick="showSignup()" style="background:none;border:none;color:var(--primary);cursor:pointer;font-weight:600;text-decoration:underline">Créer un compte</button></p>
-    <p style="text-align:center;margin-top:16px;font-size:12px;color:var(--text3)">Comptes démo : 00001/admin123 (admin) · 10001/mag123 (magasinier) · 20001/agent123 (agent)</p>
-    <p style="text-align:center;margin-top:8px"><button onclick="resetDB()" style="background:none;border:none;font-size:11px;color:var(--text3);cursor:pointer;text-decoration:underline">Réinitialiser les données</button></p>
+    
   </div>
 
   <div class="auth-card" id="signup-view" style="display:none">
@@ -1396,10 +1395,7 @@
 // =============================
 const DB = {
   users: [
-    { id:'u1', login:'00001', pass:'admin123', name:'Admin Système', matricule:'00001', tel:'+32 2 515 20 00', email:'admin@stib.be', role:'admin', magasin:'', active:true, statut:'actif', perms:['dashboard','catalog','kits','tools','myloans','cart','myorders','orders','loansmgr','deliveries','notifications','messages','profile','admin','settings'] },
-    { id:'u2', login:'10001', pass:'mag123', name:'Jean DUPONT', matricule:'10001', tel:'+32 470 11 22 33', email:'j.dupont@stib.be', role:'magasinier', magasin:'2K', active:true, statut:'actif', perms:['dashboard','catalog','kits','tools','myloans','cart','myorders','orders','loansmgr','deliveries','notifications','messages','profile'] },
-    { id:'u3', login:'20001', pass:'agent123', name:'Mohamed BENSALEM', matricule:'20001', tel:'+32 470 44 55 66', email:'m.bensalem@stib.be', role:'agent', magasin:'2K', active:true, statut:'actif', perms:['catalog','kits','tools','myloans','cart','myorders','notifications','messages','profile'] },
-    { id:'u4', login:'10002', pass:'mag123', name:'Sophie MARTIN', matricule:'10002', tel:'+32 470 77 88 99', email:'s.martin@stib.be', role:'magasinier', magasin:'2C', active:true, statut:'actif', perms:['dashboard','catalog','kits','tools','myloans','cart','myorders','orders','loansmgr','deliveries','notifications','messages','profile'] },
+    { id:'u1', login:'00001', name:'Admin Système', matricule:'00001', tel:'', email:'mezhas@gmail.com', role:'admin', magasin:'', active:true, statut:'actif', perms:['dashboard','catalog','kits','tools','myloans','cart','myorders','orders','loansmgr','deliveries','notifications','messages','profile','admin','settings'] },
   ],
   articles: [
     { id:'a1', sap:'10001234', desc:'Filtre à huile moteur', fournisseur:'MANN-FILTER', fournisseurRef:'W940/25', magasin:'2K', emplacement:'A1-E2-C3', keywords:'filtre huile moteur lubrification', busStandard:true, busArticule:true, serialise:false, reparable:false, chimique:false, stock:12, photo:'' },
@@ -1674,35 +1670,47 @@ function doSignup() {
   ['su-prenom','su-nom','su-matricule','su-tel','su-pass','su-pass2'].forEach(id => document.getElementById(id).value = '');
 }
 
-function doLogin() {
-  const login = document.getElementById('login-user').value.trim();
-  const pass = document.getElementById('login-pass').value.trim();
-  const user = DB.users.find(u => u.login === login && u.pass === pass);
-  const errEl = document.getElementById('login-error');
-  if(!user) {
-    errEl.textContent = 'Identifiant ou mot de passe incorrect.';
-    errEl.style.display = 'block';
+async function doLogin() {
+  const login = document.getElementById("login-user").value.trim();
+  const pass = document.getElementById("login-pass").value.trim();
+  const errEl = document.getElementById("login-error");
+  errEl.style.display = "none";
+  if(!login || !pass) {
+    errEl.textContent = "Veuillez saisir votre matricule et mot de passe.";
+    errEl.style.display = "block";
     return;
   }
-  if(user.statut === 'en_attente') {
-    errEl.textContent = '⏳ Votre compte est en attente de validation par un administrateur.';
-    errEl.style.display = 'block';
+  const user = DB.users.find(u => u.login === login);
+  if(!user || !user.email) {
+    errEl.textContent = "Identifiant inconnu. Contactez un administrateur.";
+    errEl.style.display = "block";
     return;
   }
-  if(user.statut === 'refuse') {
-    errEl.textContent = '🚫 Votre demande d\'inscription a été refusée. Contactez un administrateur.';
-    errEl.style.display = 'block';
+  if(user.statut === "en_attente") {
+    errEl.textContent = "⏳ Votre compte est en attente de validation par un administrateur.";
+    errEl.style.display = "block";
+    return;
+  }
+  if(user.statut === "refuse") {
+    errEl.textContent = "🚫 Votre demande a été refusée. Contactez un administrateur.";
+    errEl.style.display = "block";
     return;
   }
   if(!user.active) {
-    errEl.textContent = '🚫 Ce compte est désactivé. Contactez un administrateur.';
-    errEl.style.display = 'block';
+    errEl.textContent = "🚫 Ce compte est désactivé. Contactez un administrateur.";
+    errEl.style.display = "block";
     return;
   }
-  currentUser = user;
-  window.currentUser = user;
-  errEl.style.display = 'none';
-  startApp();
+  try {
+    await window.fbSignIn(user.email, pass);
+    currentUser = user;
+    window.currentUser = user;
+    errEl.style.display = "none";
+    startApp();
+  } catch(e) {
+    errEl.textContent = "Mot de passe incorrect.";
+    errEl.style.display = "block";
+  }
 }
 
 function doLogout() {
