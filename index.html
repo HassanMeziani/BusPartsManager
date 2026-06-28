@@ -4,11 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BusPartsManager — Gestion Pièces de Rechange</title>
-<!-- Firebase SDK (v10 ESM) -->
+<!-- Firebase SDK (v10 ESM) - Firestore uniquement pour sync données -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-  import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyD7LxL8v6KnJGTGm9nRlBN4tL5724WFdsQ",
@@ -21,27 +20,23 @@
 
   const fbApp = initializeApp(firebaseConfig);
   const fsdb  = getFirestore(fbApp);
-  const auth  = getAuth(fbApp);
   const DB_REF = doc(fsdb, 'bpm', 'database');
 
   window.fbSave = async function(data) {
-    try { await setDoc(DB_REF, data, { merge: false }); }
-    catch(e) { try { localStorage.setItem('bpm_db_backup', JSON.stringify(data)); } catch(_){} }
+    try { await setDoc(DB_REF, data, { merge: false }); } catch(e) {}
   };
 
   window.fbLoad = async function() {
-    try { const s = await getDoc(DB_REF); if(s.exists()) return s.data(); }
-    catch(e) {}
+    try { const s = await getDoc(DB_REF); if(s.exists()) return s.data(); } catch(e) {}
     return null;
   };
 
-  window.fbListen = function(cb) {
+  window.fbListen = function() {
     onSnapshot(DB_REF, (snap) => {
       if(!snap.exists()) return;
       const r = snap.data();
       const keys = Object.keys(r).filter(k => k !== 'init');
       if(keys.length === 0) return;
-      if(cb) { cb(r); return; }
       if(r.articles)      DB.articles      = r.articles;
       if(r.orders)        DB.orders        = r.orders;
       if(r.kits)          DB.kits          = r.kits;
@@ -60,17 +55,6 @@
     });
   };
 
-  window.fbSignIn     = (email, pass) => signInWithEmailAndPassword(auth, email, pass);
-  window.fbSignOut    = ()            => signOut(auth);
-  window.fbCreateUser = (email, pass) => createUserWithEmailAndPassword(auth, email, pass);
-  window.fbResetPassword = (email)   => sendPasswordResetEmail(auth, email);
-
-  onAuthStateChanged(auth, (user) => {
-    window._fbAuthUser = user;
-    if(!user && window.currentUser) { window.doLogout && window.doLogout(); }
-  });
-
-  // Firebase prêt — sync en arrière-plan sans bloquer l'affichage
   if(window._fbReadyResolve) window._fbReadyResolve();
 </script>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230B2545'/><rect x='8' y='8' width='84' height='84' rx='14' fill='none' stroke='%23F2A23C' stroke-width='4'/><text y='.92em' font-size='62' x='18'>🚌</text></svg>">
@@ -1527,8 +1511,6 @@ function load() {
     agent: ['catalog','kits','tools','myloans','cart','myorders','notifications','messages','profile']
   };
   const NEW_PAGES = ['tools','myloans','loansmgr','profile','kits','messages','journal'];
-
-  // Charger depuis localStorage immédiatement
   try {
     const d = localStorage.getItem('bpm_db');
     if(d) {
@@ -1692,14 +1674,9 @@ async function doSignup() {
   };
 
   try {
-    // Créer le compte Firebase Auth immédiatement
-    await window.fbCreateUser(email, pass);
-    // Déconnecter l'utilisateur qui vient de s'inscrire (il doit attendre la validation)
-    await window.fbSignOut();
-
     DB.users.push({
       id: 'u' + Date.now(),
-      login: matricule, name: `${prenom} ${nom.toUpperCase()}`, matricule, tel, email,
+      login: matricule, pass, name: `${prenom} ${nom.toUpperCase()}`, matricule, tel, email,
       role, magasin, active: false, statut: 'en_attente',
       perms: defaultPerms[role] || []
     });
@@ -1710,18 +1687,14 @@ async function doSignup() {
     document.getElementById('pending-view').style.display = 'block';
     ['su-prenom','su-nom','su-matricule','su-tel','su-email','su-pass','su-pass2'].forEach(id => document.getElementById(id).value = '');
   } catch(e) {
-    let msg = 'Erreur lors de la création du compte.';
-    if(e.code === 'auth/email-already-in-use') msg = '🚫 Cet email est déjà utilisé.';
-    if(e.code === 'auth/invalid-email') msg = '🚫 Email invalide.';
-    if(e.code === 'auth/weak-password') msg = '🚫 Mot de passe trop court (minimum 6 caractères).';
-    errEl.textContent = msg;
+    errEl.textContent = 'Erreur lors de la création du compte.';
     errEl.style.display = 'block';
   } finally {
     if(btn) { btn.disabled = false; btn.textContent = 'Envoyer ma demande'; }
   }
 }
 
-async function doLogin() {
+function doLogin() {
   const login = document.getElementById("login-user").value.trim();
   const pass = document.getElementById("login-pass").value.trim();
   const errEl = document.getElementById("login-error");
@@ -1732,7 +1705,7 @@ async function doLogin() {
     return;
   }
   const user = DB.users.find(u => u.login === login);
-  if(!user || !user.email) {
+  if(!user) {
     errEl.textContent = "Identifiant inconnu. Contactez un administrateur.";
     errEl.style.display = "block";
     return;
@@ -1752,35 +1725,15 @@ async function doLogin() {
     errEl.style.display = "block";
     return;
   }
-  try {
-    // Vérification mot de passe locale (comme STK_V14 qui fonctionnait)
-    if(user.pass && user.pass !== pass) {
-      errEl.textContent = "Mot de passe incorrect.";
-      errEl.style.display = "block";
-      return;
-    }
-    // Si pas de mot de passe local, essayer Firebase Auth
-    if(!user.pass && window.fbSignIn) {
-      try {
-        await Promise.race([
-          window.fbReady,
-          new Promise(resolve => setTimeout(resolve, 5000))
-        ]);
-        await window.fbSignIn(user.email, pass);
-      } catch(e) {
-        errEl.textContent = "Mot de passe incorrect.";
-        errEl.style.display = "block";
-        return;
-      }
-    }
-    currentUser = user;
-    window.currentUser = user;
-    errEl.style.display = "none";
-    startApp();
-  } catch(e) {
+  if(!user.pass || user.pass !== pass) {
     errEl.textContent = "Mot de passe incorrect.";
     errEl.style.display = "block";
+    return;
   }
+  currentUser = user;
+  window.currentUser = user;
+  errEl.style.display = "none";
+  startApp();
 }
 
 function doLogout() {
@@ -3394,23 +3347,11 @@ async function saveUser() {
     const saveBtn = document.querySelector('#modal-add-user .btn-primary');
     if(saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Création en cours...'; }
 
-    try {
-      await window.fbCreateUser(email, pass);
-      DB.users.push({ id:'u'+Date.now(), ...data, active:true, statut:'actif' });
-      save();
-      closeModal('modal-add-user');
-      renderAdmin();
-      showNotif('✅', 'Utilisateur créé', `${name} peut maintenant se connecter avec son email et mot de passe`);
-    } catch(e) {
-      let msg = 'Erreur lors de la création du compte.';
-      if(e.code === 'auth/email-already-in-use') msg = '🚫 Cet email est déjà utilisé sur Firebase.';
-      if(e.code === 'auth/invalid-email') msg = '🚫 Email invalide.';
-      if(e.code === 'auth/weak-password') msg = '🚫 Mot de passe trop court (minimum 6 caractères).';
-      errEl.textContent = msg;
-      errEl.style.display = 'block';
-    } finally {
-      if(saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Enregistrer'; }
-    }
+    DB.users.push({ id:'u'+Date.now(), ...data, active:true, statut:'actif' });
+    save();
+    closeModal('modal-add-user');
+    renderAdmin();
+    showNotif('✅', 'Utilisateur créé', `${name} peut maintenant se connecter avec son matricule et mot de passe`);
   }
 }
 
@@ -5162,23 +5103,22 @@ window.refreshCurrentView = function() {
 window.fbReady = new Promise(resolve => { window._fbReadyResolve = resolve; });
 load();
 
-// Firebase sync en arrière-plan (sans bloquer l'affichage)
+// Firebase sync en arrière-plan
 window.fbReady.then(() => {
   if(window.fbLoad) {
     window.fbLoad().then(r => {
-      if(r && r.users && r.users.length) {
-        if(r.articles)      DB.articles      = r.articles;
-        if(r.orders)        DB.orders        = r.orders;
-        if(r.kits)          DB.kits          = r.kits;
-        if(r.tools)         DB.tools         = r.tools;
-        if(r.loans)         DB.loans         = r.loans;
-        if(r.notifications) DB.notifications = r.notifications;
-        if(r.activity)      DB.activity      = r.activity;
-        if(r.messages)      DB.messages      = r.messages;
-        if(r.settings)      DB.settings      = r.settings;
-        if(r.users)         DB.users         = r.users;
-        try { localStorage.setItem('bpm_db', JSON.stringify(DB)); } catch(e){}
-      }
+      if(!r || !r.users || !r.users.length) return;
+      if(r.articles)      DB.articles      = r.articles;
+      if(r.orders)        DB.orders        = r.orders;
+      if(r.kits)          DB.kits          = r.kits;
+      if(r.tools)         DB.tools         = r.tools;
+      if(r.loans)         DB.loans         = r.loans;
+      if(r.notifications) DB.notifications = r.notifications;
+      if(r.activity)      DB.activity      = r.activity;
+      if(r.messages)      DB.messages      = r.messages;
+      if(r.settings)      DB.settings      = r.settings;
+      if(r.users)         DB.users         = r.users;
+      try { localStorage.setItem('bpm_db', JSON.stringify(DB)); } catch(e){}
     }).catch(() => {});
   }
   if(window.fbListen) window.fbListen();
