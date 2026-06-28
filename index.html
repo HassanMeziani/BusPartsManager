@@ -1419,7 +1419,7 @@
 // =============================
 const DB = {
   users: [
-    { id:'u1', login:'00001', name:'Admin Système', matricule:'00001', tel:'', email:'mezhas@gmail.com', role:'admin', magasin:'', active:true, statut:'actif', perms:['dashboard','catalog','kits','tools','myloans','cart','myorders','orders','loansmgr','deliveries','notifications','messages','profile','admin','settings'] },
+    { id:'u1', login:'00001', pass:'admin123', name:'Admin Système', matricule:'00001', tel:'', email:'mezhas@gmail.com', role:'admin', magasin:'', active:true, statut:'actif', perms:['dashboard','catalog','kits','tools','myloans','cart','myorders','orders','loansmgr','deliveries','notifications','messages','profile','admin','settings'] },
   ],
   articles: [
     { id:'a1', sap:'10001234', desc:'Filtre à huile moteur', fournisseur:'MANN-FILTER', fournisseurRef:'W940/25', magasin:'2K', emplacement:'A1-E2-C3', keywords:'filtre huile moteur lubrification', busStandard:true, busArticule:true, serialise:false, reparable:false, chimique:false, stock:12, photo:'' },
@@ -1753,15 +1753,26 @@ async function doLogin() {
     return;
   }
   try {
-    // Attendre que Firebase soit prêt (max 5s)
-    if(!window.fbSignIn) {
-      await Promise.race([
-        window.fbReady,
-        new Promise(resolve => setTimeout(resolve, 5000))
-      ]);
+    // Vérification mot de passe locale (comme STK_V14 qui fonctionnait)
+    if(user.pass && user.pass !== pass) {
+      errEl.textContent = "Mot de passe incorrect.";
+      errEl.style.display = "block";
+      return;
     }
-    if(!window.fbSignIn) throw new Error('Firebase non disponible');
-    await window.fbSignIn(user.email, pass);
+    // Si pas de mot de passe local, essayer Firebase Auth
+    if(!user.pass && window.fbSignIn) {
+      try {
+        await Promise.race([
+          window.fbReady,
+          new Promise(resolve => setTimeout(resolve, 5000))
+        ]);
+        await window.fbSignIn(user.email, pass);
+      } catch(e) {
+        errEl.textContent = "Mot de passe incorrect.";
+        errEl.style.display = "block";
+        return;
+      }
+    }
     currentUser = user;
     window.currentUser = user;
     errEl.style.display = "none";
