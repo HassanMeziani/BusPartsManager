@@ -1753,6 +1753,14 @@ async function doLogin() {
     return;
   }
   try {
+    // Attendre que Firebase soit prêt (max 5s)
+    if(!window.fbSignIn) {
+      await Promise.race([
+        window.fbReady,
+        new Promise(resolve => setTimeout(resolve, 5000))
+      ]);
+    }
+    if(!window.fbSignIn) throw new Error('Firebase non disponible');
     await window.fbSignIn(user.email, pass);
     currentUser = user;
     window.currentUser = user;
