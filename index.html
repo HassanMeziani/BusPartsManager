@@ -1412,7 +1412,6 @@ let photoDataUrl = '';
 
 function save() {
   try { localStorage.setItem('bpm_db', JSON.stringify(DB)); } catch(e){}
-  try { if(window.fbSave) window.fbSave(JSON.parse(JSON.stringify(DB))); } catch(e){}
 }
 
 function saveCart() {
@@ -4930,39 +4929,8 @@ document.getElementById('login-pass').addEventListener('keydown', e => { if(e.ke
 
 // INIT
 load();
-
-// Firebase sync en arrière-plan
-window._fbReady = new Promise(r => window._fbReadyResolve = r);
-window._fbReady.then(() => {
-  if(window.fbLoad) window.fbLoad().then(r => {
-    if(!r || !r.users || !r.users.length) return;
-    Object.assign(DB, r);
-    try { localStorage.setItem('bpm_db', JSON.stringify(DB)); } catch(e){}
-  }).catch(()=>{});
-  if(window.fbListen) window.fbListen();
-}).catch(()=>{});
 </script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-const app = initializeApp({ apiKey:"AIzaSyD7LxL8v6KnJGTGm9nRlBN4tL5724WFdsQ", authDomain:"buspartsmanager-13971.firebaseapp.com", projectId:"buspartsmanager-13971", storageBucket:"buspartsmanager-13971.firebasestorage.app", messagingSenderId:"470052325973", appId:"1:470052325973:web:b861672ecec3ee4cd3a2dc" });
-const db = getFirestore(app);
-const REF = doc(db, 'bpm', 'database');
-window.fbSave = async d => { try { await setDoc(REF, d); } catch(e){} };
-window.fbLoad = async () => { try { const s = await getDoc(REF); return s.exists() ? s.data() : null; } catch(e){ return null; } };
-window.fbListen = () => onSnapshot(REF, s => {
-  if(!s.exists()) return;
-  const r = s.data();
-  if(!r.users || !r.users.length) return;
-  Object.assign(DB, r);
-  try { localStorage.setItem('bpm_db', JSON.stringify(DB)); } catch(e){}
-  if(window.currentUser && window.currentViewId) {
-    try { window.refreshCurrentView && window.refreshCurrentView(); } catch(_){}
-  }
-});
-if(window._fbReadyResolve) window._fbReadyResolve();
-</script>
 </body>
 </html>
