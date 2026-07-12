@@ -1500,6 +1500,47 @@
 
 <script>
 // =============================
+// SÉCURITÉ MOTS DE PASSE (hash + sel, Web Crypto SHA-256)
+// =============================
+// Les mots de passe ne sont jamais stockés ni comparés en clair : on stocke
+// passHash + passSalt par utilisateur. Un ancien champ "pass" en clair
+// (données d'avant ce patch) est migré automatiquement dès que les données
+// sont chargées (voir migratePasswordsIfNeeded), qu'elles viennent du cache
+// local ou de Firestore.
+async function sha256Hex(str) {
+  const enc = new TextEncoder().encode(str);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function randomSalt() {
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function hashPassword(plain, salt) {
+  return sha256Hex(salt + ':' + plain);
+}
+let migratingPasswords = false;
+async function migratePasswordsIfNeeded() {
+  if (migratingPasswords) return;
+  if (!DB.users.some(u => u.pass !== undefined)) return;
+  migratingPasswords = true;
+  try {
+    for (const u of DB.users) {
+      if (u.pass !== undefined) {
+        const salt = randomSalt();
+        u.passHash = await hashPassword(u.pass, salt);
+        u.passSalt = salt;
+        delete u.pass;
+      }
+    }
+    save();
+  } finally {
+    migratingPasswords = false;
+  }
+}
+
+// =============================
 // DATA STORE
 // =============================
 const DB = {
@@ -1622,6 +1663,11 @@ window.applyRemoteData = function(data) {
   } finally {
     applyingRemote = false;
   }
+  // Si les données reçues de Firestore contiennent encore des mots de passe
+  // en clair (comptes créés avant ce patch), on les migre vers un hash
+  // maintenant que applyingRemote est repassé à false (pour que la version
+  // migrée soit bien renvoyée vers Firestore).
+  if (typeof migratePasswordsIfNeeded === 'function') migratePasswordsIfNeeded();
 };
 
 // Première utilisation : le document Firestore n'existe pas encore →
@@ -1647,6 +1693,8 @@ function loadCart() {
     });
   } catch(e) { cart = []; }
 }
+migratePasswordsIfNeeded();
+
 const ALL_PERMS = {
   admin: ['dashboard','catalog','kits','tools','myloans','cart','myorders','orders','loansmgr','deliveries','journal','notifications','messages','profile','admin','settings'],
   magasinier: ['dashboard','catalog','kits','tools','myloans','cart','myorders','orders','loansmgr','deliveries','journal','notifications','messages','profile'],
@@ -1692,6 +1740,7 @@ function load() {
       }
     }
   } catch(e){ console.warn('DB load error (cache local):', e); }
+  migratePasswordsIfNeeded();
 }
 
 function resetDB() {
@@ -1804,9 +1853,11 @@ async function doSignupSubmit(prenom, nom, matricule, magasin, role, tel, pass, 
     agent: ['catalog','kits','tools','myloans','cart','myorders','notifications','profile']
   };
 
+  const signupSalt = randomSalt();
+  const signupPassHash = await hashPassword(pass, signupSalt);
   DB.users.push({
     id: 'u' + Date.now(),
-    login: matricule, pass, name: `${prenom} ${nom.toUpperCase()}`, matricule, tel, email:'',
+    login: matricule, passHash: signupPassHash, passSalt: signupSalt, name: `${prenom} ${nom.toUpperCase()}`, matricule, tel, email:'',
     role, magasin, active: false, statut: 'en_attente',
     perms: defaultPerms[role] || []
   });
@@ -1819,11 +1870,13 @@ async function doSignupSubmit(prenom, nom, matricule, magasin, role, tel, pass, 
   ['su-prenom','su-nom','su-matricule','su-tel','su-pass','su-pass2'].forEach(id => document.getElementById(id).value = '');
 }
 
-function doLogin() {
+async function doLogin() {
   const login = document.getElementById('login-user').value.trim();
   const pass = document.getElementById('login-pass').value.trim();
-  const user = DB.users.find(u => u.login === login && u.pass === pass);
   const errEl = document.getElementById('login-error');
+  const candidate = DB.users.find(u => u.login === login);
+  const user = (candidate && candidate.passHash && (await hashPassword(pass, candidate.passSalt)) === candidate.passHash)
+    ? candidate : null;
   if(!user) {
     errEl.textContent = 'Identifiant ou mot de passe incorrect.';
     errEl.style.display = 'block';
@@ -3454,6 +3507,7 @@ function openAddUserModal() {
   editingUserId = null;
   document.getElementById('add-user-title').textContent = 'Ajouter un utilisateur';
   ['user-pass','user-name','user-matricule','user-tel','user-email'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('user-pass').placeholder = 'mot de passe';
   document.getElementById('user-matricule-counter').textContent = '0/5';
   document.getElementById('user-matricule').style.borderColor = 'var(--border)';
   document.getElementById('user-matricule-error').style.display = 'none';
@@ -3466,7 +3520,10 @@ function editUser(id) {
   editingUserId = id;
   const u = DB.users.find(x => x.id === id);
   document.getElementById('add-user-title').textContent = 'Modifier l\'utilisateur';
-  document.getElementById('user-pass').value = u.pass;
+  // Le mot de passe est haché : on ne peut plus le pré-remplir. Le champ
+  // reste vide ; on ne le change que si l'admin saisit une nouvelle valeur.
+  document.getElementById('user-pass').value = '';
+  document.getElementById('user-pass').placeholder = 'Laisser vide pour ne pas changer';
   document.getElementById('user-name').value = u.name;
   document.getElementById('user-matricule').value = u.matricule || '';
   document.getElementById('user-matricule-counter').textContent = (u.matricule||'').length + '/5';
@@ -3486,14 +3543,16 @@ function populateUserMagasinSelect(selected) {
   }).join('');
 }
 
-function saveUser() {
+async function saveUser() {
   const matricule = document.getElementById('user-matricule').value.replace(/[^0-9]/g,'');
-  const pass = document.getElementById('user-pass').value.trim();
+  const passInput = document.getElementById('user-pass').value.trim();
   const name = document.getElementById('user-name').value.trim();
   const errEl = document.getElementById('user-matricule-error');
   errEl.style.display = 'none';
 
-  if(!pass || !name) { alert('Veuillez remplir tous les champs obligatoires.'); return; }
+  // Le mot de passe est obligatoire à la création ; en édition, on peut le
+  // laisser vide pour ne pas le changer.
+  if((!editingUserId && !passInput) || !name) { alert('Veuillez remplir tous les champs obligatoires.'); return; }
   if(matricule.length !== 5) {
     errEl.textContent = `⚠️ Le matricule doit comporter exactement 5 chiffres (${matricule.length}/5 saisi).`;
     errEl.style.display = 'block';
@@ -3506,7 +3565,12 @@ function saveUser() {
     magasinier: ['dashboard','catalog','kits','tools','myloans','cart','myorders','orders','loansmgr','deliveries','journal','notifications','messages','profile'],
     agent: ['catalog','kits','tools','myloans','cart','myorders','notifications','messages','profile']
   };
-  const data = { login: matricule, pass, name: sanitizeInput(name), matricule, tel: sanitizeInput(document.getElementById('user-tel').value), email: sanitizeInput(document.getElementById('user-email').value), role, magasin: document.getElementById('user-magasin').value, perms: defaultPerms[role] || [] };
+  const data = { login: matricule, name: sanitizeInput(name), matricule, tel: sanitizeInput(document.getElementById('user-tel').value), email: sanitizeInput(document.getElementById('user-email').value), role, magasin: document.getElementById('user-magasin').value, perms: defaultPerms[role] || [] };
+  if(passInput) {
+    const salt = randomSalt();
+    data.passHash = await hashPassword(passInput, salt);
+    data.passSalt = salt;
+  }
   if(editingUserId) {
     const idx = DB.users.findIndex(u => u.id === editingUserId);
     const dup = DB.users.find(u => (u.login === matricule || u.matricule === matricule) && u.id !== editingUserId);
@@ -4625,7 +4689,7 @@ function toggleProfileEdit(show) {
   }
 }
 
-function saveProfile() {
+async function saveProfile() {
   const errEl = document.getElementById('profile-error');
   errEl.style.display = 'none';
   const tel = sanitizeInput(document.getElementById('profile-tel').value);
@@ -4644,7 +4708,8 @@ function saveProfile() {
 
   // Changement mot de passe (optionnel)
   if(passCurrent || passNew || passConfirm) {
-    if(passCurrent !== currentUser.pass) {
+    const currentHash = await hashPassword(passCurrent, currentUser.passSalt);
+    if(currentHash !== currentUser.passHash) {
       errEl.textContent = '⚠️ Le mot de passe actuel est incorrect.';
       errEl.style.display = 'block';
       return;
@@ -4659,8 +4724,12 @@ function saveProfile() {
       errEl.style.display = 'block';
       return;
     }
-    DB.users[idx].pass = passNew;
-    currentUser.pass = passNew;
+    const newSalt = randomSalt();
+    const newHash = await hashPassword(passNew, newSalt);
+    DB.users[idx].passHash = newHash;
+    DB.users[idx].passSalt = newSalt;
+    currentUser.passHash = newHash;
+    currentUser.passSalt = newSalt;
   }
 
   save();
