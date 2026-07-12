@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BusPartsManager — Gestion Pièces de Rechange</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230B2545'/><rect x='8' y='8' width='84' height='84' rx='14' fill='none' stroke='%23F2A23C' stroke-width='4'/><text y='.92em' font-size='62' x='18'>🚌</text></svg>">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0B2545">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BusParts">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -342,6 +348,10 @@
       <input type="password" id="login-pass" placeholder="Votre mot de passe" value="admin123">
     </div>
     <div id="login-error" style="color:var(--danger);font-size:13px;margin-bottom:12px;display:none;"></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+      <input type="checkbox" id="login-remember" checked style="width:16px;height:16px;cursor:pointer">
+      <label for="login-remember" style="font-size:12.5px;color:var(--text2);cursor:pointer;user-select:none">Rester connecté sur cet appareil</label>
+    </div>
     <button class="btn btn-primary btn-block" style="margin-top:8px;padding:12px" onclick="doLogin()">Se connecter</button>
     <p style="text-align:center;margin-top:16px;font-size:13px"><button onclick="showSignup()" style="background:none;border:none;color:var(--primary);cursor:pointer;font-weight:600;text-decoration:underline">Créer un compte</button></p>
     <p style="text-align:center;margin-top:16px;font-size:12px;color:var(--text3)">Comptes démo : 00001/admin123 (admin) · 10001/mag123 (magasinier) · 20001/agent123 (agent)</p>
@@ -1373,6 +1383,7 @@
 
   function showAuthScreenNow() {
     document.getElementById('fb-boot-screen').style.display = 'none';
+    if (window.tryAutoLogin && window.tryAutoLogin()) return; // déjà reconnecté automatiquement
     document.getElementById('auth-screen').style.display = 'flex';
   }
 
@@ -1792,6 +1803,12 @@ function doLogin() {
   }
   currentUser = user;
   errEl.style.display = 'none';
+  const remember = document.getElementById('login-remember');
+  if(remember && remember.checked) {
+    try { localStorage.setItem('bpm_session', JSON.stringify({ matricule: user.matricule })); } catch(e){}
+  } else {
+    try { localStorage.removeItem('bpm_session'); } catch(e){}
+  }
   startApp();
 }
 
@@ -1808,7 +1825,27 @@ function doLogout() {
   if(cb) cb.style.display = 'none';
   document.getElementById('auth-screen').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
+  try { localStorage.removeItem('bpm_session'); } catch(e){}
 }
+
+// Reconnexion automatique : appelée par le module Firebase juste avant
+// d'afficher l'écran de connexion, une fois les données synchronisées.
+// Renvoie true si un compte a été reconnecté automatiquement.
+window.tryAutoLogin = function() {
+  try {
+    const raw = localStorage.getItem('bpm_session');
+    if(!raw) return false;
+    const session = JSON.parse(raw);
+    const user = DB.users.find(u => u.matricule === session.matricule);
+    if(!user || user.statut !== 'actif' || !user.active) {
+      localStorage.removeItem('bpm_session');
+      return false;
+    }
+    currentUser = user;
+    startApp();
+    return true;
+  } catch(e) { return false; }
+};
 
 function getFirstName(fullName) {
   return (fullName || '').split(' ')[0] || '';
@@ -5146,6 +5183,13 @@ document.getElementById('login-pass').addEventListener('keydown', e => { if(e.ke
 
 // INIT
 load();
+
+// Enregistrement du service worker (rend l'app installable sur l'écran d'accueil)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch(e => console.warn('SW non enregistré:', e));
+  });
+}
 </script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
