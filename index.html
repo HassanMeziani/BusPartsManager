@@ -257,15 +257,32 @@
 
   /* ══════════════ RESPONSIVE ══════════════ */
   @media (max-width: 768px) {
-    .sidebar { width: 0; overflow: hidden; box-shadow: none; }
+    .sidebar { width: 244px; transform: translateX(-100%); transition: transform 0.22s ease; box-shadow: none; z-index: 300; }
+    .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
     .main { margin-left: 0; }
     .grid-4 { grid-template-columns: 1fr 1fr; }
     .grid-3 { grid-template-columns: 1fr; }
     .grid-2 { grid-template-columns: 1fr; }
     .article-detail { grid-template-columns: 1fr; }
     .topbar { padding: 14px 18px; }
-    .content { padding: 18px 18px 60px; }
+    .content { padding: 18px 18px 60px; padding-bottom: 84px; }
+    .search-bar { display: none; }
+    #hamburger-btn { display: flex; }
+    .bottom-nav { display: flex; }
+    .sidebar-backdrop.open { display: block; }
   }
+
+  #hamburger-btn { display: none; width: 36px; height: 36px; border-radius: 8px; border: 1.5px solid var(--border); background: var(--surface); align-items: center; justify-content: center; font-size: 17px; cursor: pointer; margin-right: 10px; flex-shrink: 0; color: var(--text); }
+  .sidebar-backdrop { display: none; position: fixed; inset: 0; background: rgba(11,37,69,0.35); z-index: 250; }
+  .sidebar-close { display: none; }
+  @media (max-width: 768px) { .sidebar-close { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; background: rgba(255,255,255,0.1); color: #fff; cursor: pointer; font-size: 15px; } }
+
+  .bottom-nav { display: none; position: fixed; left: 0; right: 0; bottom: 0; height: 62px; background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -2px 10px rgba(11,37,69,0.06); z-index: 200; align-items: stretch; justify-content: space-around; padding-bottom: env(safe-area-inset-bottom); }
+  .bn-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; position: relative; cursor: pointer; color: var(--text3); }
+  .bn-item.active { color: var(--navy); }
+  .bn-icon { font-size: 19px; line-height: 1; }
+  .bn-label { font-size: 10px; font-weight: 600; }
+  .bn-badge { position: absolute; top: 2px; right: calc(50% - 22px); min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--danger); color: #fff; font-size: 9.5px; font-weight: 700; display: none; align-items: center; justify-content: center; }
 
   .highlight { background: var(--amber-light); color: var(--amber-dark); padding: 0 2px; border-radius: 2px; font-weight: 700; }
   .empty-state { text-align: center; padding: 64px 20px; color: var(--text3); }
@@ -424,10 +441,11 @@
   <aside class="sidebar">
     <div class="sidebar-logo">
       <div class="sidebar-logo-icon">🚌</div>
-      <div>
+      <div style="flex:1">
         <span>BusParts</span>
         <small>Gestion Pièces · v1.4.1</small>
       </div>
+      <div class="sidebar-close" onclick="closeMobileMenu()">✕</div>
     </div>
     <nav class="sidebar-nav">
       <div class="nav-section">Principal</div>
@@ -497,8 +515,32 @@
     </div>
   </aside>
 
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeMobileMenu()"></div>
+
+  <nav class="bottom-nav" id="bottom-nav">
+    <div class="bn-item" onclick="navGo('catalog')" id="bn-catalog">
+      <span class="bn-icon">🔧</span><span class="bn-label">Catalogue</span>
+    </div>
+    <div class="bn-item" onclick="navCommandes()" id="bn-commandes">
+      <span class="bn-icon">📋</span><span class="bn-label">Commandes</span>
+      <span class="bn-badge" id="bn-commandes-badge">0</span>
+    </div>
+    <div class="bn-item" onclick="navGo('cart')" id="bn-cart">
+      <span class="bn-icon">🛒</span><span class="bn-label">Panier</span>
+      <span class="bn-badge" id="bn-cart-badge">0</span>
+    </div>
+    <div class="bn-item" onclick="navGo('deliveries')" id="bn-deliveries">
+      <span class="bn-icon">✅</span><span class="bn-label">Prêt à livrer</span>
+      <span class="bn-badge" id="bn-deliveries-badge">0</span>
+    </div>
+    <div class="bn-item" onclick="toggleMobileMenu()" id="bn-menu">
+      <span class="bn-icon">☰</span><span class="bn-label">Menu</span>
+    </div>
+  </nav>
+
   <main class="main">
     <div class="topbar">
+      <div id="hamburger-btn" onclick="toggleMobileMenu()">☰</div>
       <div>
         <div id="topbar-greeting" style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text);letter-spacing:-0.2px">Bonjour 👋</div>
         <div id="topbar-datetime" style="font-size:11.5px;color:var(--text3);margin-top:1px"></div>
@@ -1875,8 +1917,8 @@ function startApp() {
   document.getElementById('topbar-user-info').textContent = topInfo.join(' · ');
   applyRoleVisibility();
   updateCartBadge(); // Synchroniser le badge panier avec le panier vide
-  // Go to first permitted page
-  const firstPage = ALL_PAGES.find(p => hasPerm(p)) || 'catalog';
+  // Go to first permitted page — le catalogue est la page d'accueil naturelle
+  const firstPage = hasPerm('catalog') ? 'catalog' : (ALL_PAGES.find(p => hasPerm(p)) || 'catalog');
   showView(firstPage);
   updateBadges();
 }
@@ -1910,11 +1952,41 @@ function applyRoleVisibility() {
   document.querySelectorAll('.magasinier-only').forEach(el => el.style.display = role === 'magasinier' ? '' : 'none');
   document.querySelectorAll('.staff-only').forEach(el => el.style.display = (role === 'admin' || role === 'magasinier') ? '' : 'none');
   document.getElementById('cart-btn').style.display = '';
+  // Bottom nav (mobile)
+  const bnCommandes = document.getElementById('bn-commandes');
+  if(bnCommandes) bnCommandes.style.display = (hasPerm('orders') || hasPerm('myorders')) ? '' : 'none';
+  const bnCart = document.getElementById('bn-cart');
+  if(bnCart) bnCart.style.display = hasPerm('cart') ? '' : 'none';
+  const bnDeliveries = document.getElementById('bn-deliveries');
+  if(bnDeliveries) bnDeliveries.style.display = hasPerm('deliveries') ? '' : 'none';
 }
 
 function navGo(page) {
   if(!hasPerm(page)) { showNotif('🚫','Accès refusé','Vous n\'avez pas accès à cette page'); return; }
   showView(page);
+}
+
+// =============================
+// MENU MOBILE (tiroir + bottom nav)
+// =============================
+function toggleMobileMenu() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.getElementById('sidebar-backdrop').classList.toggle('open');
+}
+function closeMobileMenu() {
+  document.querySelector('.sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('open');
+}
+function navCommandes() {
+  navGo(hasPerm('orders') ? 'orders' : 'myorders');
+}
+function updateBottomNavActive(name) {
+  const commandesPages = ['orders','myorders'];
+  document.querySelectorAll('.bn-item').forEach(n => n.classList.remove('active'));
+  if(name === 'catalog') document.getElementById('bn-catalog')?.classList.add('active');
+  else if(commandesPages.includes(name)) document.getElementById('bn-commandes')?.classList.add('active');
+  else if(name === 'cart') document.getElementById('bn-cart')?.classList.add('active');
+  else if(name === 'deliveries') document.getElementById('bn-deliveries')?.classList.add('active');
 }
 
 // =============================
@@ -1935,6 +2007,8 @@ function showView(name) {
     notifications:'Notifications', messages:'Messagerie', profile:'Mon profil', admin:'Administration', settings:'Paramètres'
   };
   document.getElementById('page-title').textContent = titles[name] || name;
+  updateBottomNavActive(name);
+  closeMobileMenu();
   if(name === 'catalog') renderCatalog();
   if(name === 'kits') renderKits();
   if(name === 'tools') renderTools();
@@ -2294,6 +2368,8 @@ function updateCartBadge() {
   document.getElementById('cart-btn').style.display = currentUser ? '' : 'none';
   const navBadge = document.getElementById('cart-nav-badge');
   if(navBadge) { navBadge.textContent = total; navBadge.style.display = total > 0 ? '' : 'none'; }
+  const bnBadge = document.getElementById('bn-cart-badge');
+  if(bnBadge) { bnBadge.textContent = total; bnBadge.style.display = total > 0 ? 'flex' : 'none'; }
 }
 
 // =============================
@@ -2778,6 +2854,7 @@ function renderOrderCard(o) {
       ${o.busNumero ? `<span class="badge" style="background:var(--navy);color:#fff;font-family:var(--font-mono);font-weight:700;font-size:13px">🚌 #${o.busNumero}</span>` : ''}
       <span class="badge ${statusBadge(o.status)}">${statusLabel(o.status)}</span>
     </div>
+    ${renderStepper(o.status)}
     <div class="order-items">
       ${o.items.map(item => {
         const a = DB.articles.find(x => x.id === item.articleId);
@@ -3158,6 +3235,7 @@ function renderMyOrders() {
         </div>
         <span class="badge ${statusBadge(o.status)}">${statusLabel(o.status)}</span>
       </div>
+      ${renderStepper(o.status)}
       <div class="order-items">
         ${o.items.map(item => {
           const a = DB.articles.find(x => x.id === item.articleId);
@@ -3248,6 +3326,14 @@ function updateBadges() {
   if(ob) { ob.textContent = pendingOrders; ob.style.display = pendingOrders > 0 ? '' : 'none'; }
   if(db) { db.textContent = preparedOrders; db.style.display = preparedOrders > 0 ? '' : 'none'; }
   if(nb) { nb.textContent = unreadNotifs; nb.style.display = unreadNotifs > 0 ? '' : 'none'; }
+
+  // Bottom nav badges
+  const myPendingCount = DB.orders.filter(o => o.agentId === currentUser?.id && (o.status === 'pending' || o.status === 'taken')).length;
+  const commandesCount = hasPerm('orders') ? pendingOrders : myPendingCount;
+  const bnOb = document.getElementById('bn-commandes-badge');
+  if(bnOb) { bnOb.textContent = commandesCount; bnOb.style.display = commandesCount > 0 ? 'flex' : 'none'; }
+  const bnDb = document.getElementById('bn-deliveries-badge');
+  if(bnDb) { bnDb.textContent = preparedOrders; bnDb.style.display = preparedOrders > 0 ? 'flex' : 'none'; }
 
   // Unread messages badge
   const unreadMsgs = (DB.messages||[]).filter(m => m.to === currentUser?.id && !m.read).length;
@@ -4606,6 +4692,34 @@ function statusLabel(s) {
 
 function statusBadge(s) {
   return { pending:'badge-amber', taken:'badge-blue', prepared:'badge-green', delivered:'badge-gray', cancel_requested:'badge-red', cancelled:'badge-gray' }[s] || 'badge-gray';
+}
+
+// Stepper visuel : Reçue -> Prise en charge -> Prête -> Livrée
+function renderStepper(status) {
+  if(status === 'cancelled' || status === 'cancel_requested') return '';
+  const steps = [
+    { key:'pending',   label:'Reçue',    icon:'📥' },
+    { key:'taken',     label:'Préparation', icon:'🔧' },
+    { key:'prepared',  label:'Prête',    icon:'✅' },
+    { key:'delivered', label:'Livrée',   icon:'🚚' }
+  ];
+  const order = { pending:0, taken:1, prepared:2, delivered:3 };
+  const curIdx = order[status] ?? 0;
+  return `<div style="display:flex;align-items:center;margin:10px 0 4px">
+    ${steps.map((s,i) => {
+      const done = i < curIdx, active = i === curIdx, upcoming = i > curIdx;
+      const circleBg = done ? 'var(--success)' : active ? 'var(--amber)' : 'var(--surface2)';
+      const circleColor = done ? '#fff' : active ? '#fff' : 'var(--text3)';
+      const circleBorder = upcoming ? '1.5px solid var(--border2)' : 'none';
+      const labelColor = upcoming ? 'var(--text3)' : 'var(--text)';
+      const labelWeight = active ? '700' : '500';
+      const connectorColor = i < curIdx ? 'var(--success)' : 'var(--border)';
+      return `<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0">
+          <div style="width:24px;height:24px;border-radius:50%;background:${circleBg};color:${circleColor};border:${circleBorder};display:flex;align-items:center;justify-content:center;font-size:12px">${done ? '✓' : s.icon}</div>
+          <div style="font-size:9.5px;margin-top:4px;color:${labelColor};font-weight:${labelWeight};text-align:center;white-space:nowrap">${s.label}</div>
+        </div>${i < steps.length-1 ? `<div style="flex:1;height:2px;background:${connectorColor};margin:0 -6px 15px"></div>` : ''}`;
+    }).join('')}
+  </div>`;
 }
 
 // =============================
