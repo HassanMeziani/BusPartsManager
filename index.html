@@ -3922,7 +3922,7 @@ function addNotification(toUserId, title, msg) {
 
 function renderNotifications() {
   const list = document.getElementById('notifications-list');
-  const notifs = DB.notifications.filter(n => n.to === currentUser.id || n.to === 'magasinier' && currentUser.role === 'magasinier').sort((a,b)=>b.time-a.time);
+  const notifs = DB.notifications.filter(n => n.to === currentUser.id || (n.to === 'magasinier' && currentUser.role === 'magasinier') || (n.to === 'admin' && currentUser.role === 'admin')).sort((a,b)=>b.time-a.time);
   if(!notifs.length) { list.innerHTML = '<div class="empty-state"><p>Aucune notification</p></div>'; return; }
   list.innerHTML = notifs.map(n => `
     <div class="notification-item ${n.read?'':'unread'}" onclick="markNotifRead('${n.id}')">
@@ -3947,7 +3947,7 @@ function markNotifRead(id) {
 function updateBadges() {
   const pendingOrders = DB.orders.filter(o => o.status === 'pending' || o.status === 'cancel_requested').length;
   const preparedOrders = DB.orders.filter(o => o.status === 'prepared' && (currentUser?.role === 'admin' || o.takenBy === currentUser?.id)).length;
-  const unreadNotifs = DB.notifications.filter(n => !n.read && (n.to === currentUser?.id || n.to === 'magasinier' && currentUser?.role === 'magasinier')).length;
+  const unreadNotifs = DB.notifications.filter(n => !n.read && (n.to === currentUser?.id || (n.to === 'magasinier' && currentUser?.role === 'magasinier') || (n.to === 'admin' && currentUser?.role === 'admin'))).length;
 
   const ob = document.getElementById('orders-badge');
   const db = document.getElementById('deliveries-badge');
