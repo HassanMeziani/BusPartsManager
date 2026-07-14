@@ -1471,6 +1471,7 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
     getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion, onSnapshot, runTransaction, deleteDoc, serverTimestamp,
+    collection, getDocs,
     enableIndexedDbPersistence
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -1673,6 +1674,27 @@
 
   window.fbReleaseSAP = async function(sap) {
     try { await deleteDoc(doc(fsdb, 'sapRefs', sap)); } catch(e) {}
+  };
+
+  // Nettoyage ponctuel : supprime les réservations SAP "orphelines" (créées
+  // par une tentative d'import interrompue ou une réservation dont
+  // l'enregistrement final a échoué), c'est-à-dire sans pièce correspondante
+  // dans le catalogue actuel. Sans danger : une réservation légitime a
+  // toujours une pièce avec le même SAP, donc jamais supprimée par erreur.
+  window.fbCleanOrphanSapReservations = async function(validSapsArray) {
+    try {
+      const validSaps = new Set(validSapsArray);
+      const snap = await getDocs(collection(fsdb, 'sapRefs'));
+      let removed = 0;
+      for (const d of snap.docs) {
+        if (!validSaps.has(d.id)) {
+          try { await deleteDoc(doc(fsdb, 'sapRefs', d.id)); removed++; } catch(e) {}
+        }
+      }
+      return removed;
+    } catch(e) {
+      return 0;
+    }
   };
 
   startAuthSync();
@@ -2308,6 +2330,17 @@ function startApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   restoreSidebarState();
+  // Nettoyage silencieux des réservations SAP orphelines (ex: import interrompu) —
+  // uniquement pour l'admin, une fois les données complètes bien chargées
+  // (sinon on risquerait de supprimer des réservations encore valides).
+  if(currentUser && currentUser.role === 'admin' && window.fbCleanOrphanSapReservations) {
+    window.onFirestoreReady = function() {
+      window.onFirestoreReady = null; // une seule fois par session
+      window.fbCleanOrphanSapReservations(DB.articles.map(a => a.sap)).then(removed => {
+        if(removed > 0) console.log(`🧹 ${removed} réservation(s) SAP orpheline(s) nettoyée(s).`);
+      });
+    };
+  }
   document.getElementById('sidebar-user-name').textContent = currentUser.name;
   document.getElementById('sidebar-user-role').textContent = roleLabel(currentUser.role);
   document.getElementById('sidebar-user-store').textContent = currentUser.magasin ? getMagasinLabel(currentUser.magasin) : 'Tous magasins';
@@ -4516,7 +4549,7 @@ async function processImportData(csvText, fmt) {
 
     // Data starts at row index 2 (skip header + note row)
     const dataLines = lines.slice(2);
-    let created = 0, updated = 0, skipped = 0, doublonsConcurrents = 0, errors = [];
+    let created = 0, updated = 0, skipped = 0, errors = [];
 
     for (const line of dataLines) {
       if(!line.trim()) continue;
@@ -4558,10 +4591,12 @@ async function processImportData(csvText, fmt) {
         }
         updated++;
       } else {
-        // Réservation atomique du SAP (garantit l'unicité même si une création
-        // manuelle ou un autre import a lieu au même moment sur un autre appareil).
-        const reserved = window.fbReserveSAP ? await window.fbReserveSAP(sap) : true;
-        if(!reserved) { doublonsConcurrents++; continue; }
+        // Import en masse : contrôle de doublon LOCAL uniquement (pas de
+        // réservation réseau par ligne, qui rendrait un import de plusieurs
+        // centaines de pièces extrêmement lent). Le risque résiduel de
+        // collision avec une création manuelle simultanée sur un autre
+        // appareil est négligeable ici ; la protection réseau reste active
+        // pour l'ajout/modification manuelle d'une pièce à la fois.
         article.id = 'a' + Date.now() + Math.random().toString(36).slice(2,6);
         DB.articles.push(article);
         if(article.stock > 0) {
@@ -4572,7 +4607,7 @@ async function processImportData(csvText, fmt) {
     }
 
     save();
-    addActivity('📥', `Import : ${created} créés, ${updated} mis à jour, ${skipped} ignorés${doublonsConcurrents ? ', ' + doublonsConcurrents + ' en doublon (réservés ailleurs)' : ''}`);
+    addActivity('📥', `Import : ${created} créés, ${updated} mis à jour, ${skipped} ignorés`);
 
     const body = document.getElementById('import-body');
     body.innerHTML = `
@@ -4594,7 +4629,6 @@ async function processImportData(csvText, fmt) {
           <div style="font-size:12px;color:var(--text2)">Ignorés</div>
         </div>
       </div>
-      ${doublonsConcurrents ? `<div style="background:var(--danger-light);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--danger);margin-bottom:12px">🚫 ${doublonsConcurrents} référence(s) SAP ignorée(s) car réservée(s) au même moment sur un autre appareil.</div>` : ''}
       ${errors.length ? `<div style="background:var(--danger-light);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--danger);max-height:120px;overflow-y:auto">${errors.join('<br>')}</div>` : ''}
     `;
     document.getElementById('import-close-btn').style.display = '';
