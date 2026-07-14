@@ -4371,21 +4371,43 @@ function saveSetting() {
   if(!val) return;
   const type = currentSettingType;
   const editIdx = document.getElementById('setting-value').dataset.editIdx;
+  const editIdxNum = editIdx !== '' ? parseInt(editIdx) : -1;
   let newVal;
   if(type==='agents') newVal={matricule:val, nom:document.getElementById('setting-extra').value.trim()};
   else if(type==='magasins') newVal={code:val.toUpperCase(), nom:document.getElementById('setting-extra').value.trim()||val.toUpperCase()};
   else if(type==='busParc') {
     const numeroClean = val.replace(/[^0-9]/g,'');
-    if(DB.settings.busParc.some((b,i)=>b.numero===numeroClean && i!==parseInt(editIdx))) {
-      alert(`🚫 Le numéro de bus ${numeroClean} existe déjà dans la liste.`);
-      return;
-    }
     newVal={numero:numeroClean, marque:document.getElementById('setting-extra-marque').value, type:document.getElementById('setting-extra2-type').value};
   }
   else newVal=val;
 
+  // Contrôle anti-doublon commun à toutes les listes de paramètres : chaque
+  // type a sa propre notion de "clé" (matricule pour un agent, code pour un
+  // magasin, texte normalisé pour les autres), comparée en ignorant l'élément
+  // en cours de modification.
+  const dupKey = (v) => {
+    if(type==='agents') return (v.matricule||'').trim();
+    if(type==='magasins') return (v.code||'').trim().toUpperCase();
+    if(type==='busParc') return (v.numero||'').trim();
+    return (v||'').toString().trim().toLowerCase();
+  };
+  const newKey = dupKey(newVal);
+  const dupIdx = DB.settings[type].findIndex((v,i) => i !== editIdxNum && dupKey(v) === newKey);
+  if(dupIdx !== -1) {
+    const labels = {
+      magasins: 'Ce code magasin existe déjà',
+      agents: 'Ce matricule existe déjà',
+      fournisseurs: 'Ce fournisseur existe déjà',
+      categories: 'Cette catégorie existe déjà',
+      marques: 'Cette marque existe déjà',
+      busParc: 'Ce numéro de bus existe déjà'
+    };
+    alert(`🚫 ${labels[type] || 'Cet élément existe déjà'} dans la liste.`);
+    return;
+  }
+
   if(editIdx !== '') {
-    DB.settings[type][parseInt(editIdx)] = newVal;
+    DB.settings[type][editIdxNum] = newVal;
   } else {
     DB.settings[type].push(newVal);
   }
