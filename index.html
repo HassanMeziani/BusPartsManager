@@ -1471,7 +1471,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
-    getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion, onSnapshot, runTransaction, deleteDoc, serverTimestamp,
+    getFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc, arrayUnion, onSnapshot, runTransaction, deleteDoc, serverTimestamp,
     collection, getDocs,
     enableIndexedDbPersistence
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1653,6 +1653,20 @@
     } catch (e) {
       console.warn("Ajout de l'inscription échoué :", e);
       return false;
+    }
+  };
+
+  // DIAGNOSTIC : relit le document directement depuis le serveur Firestore,
+  // en ignorant tout cache local, pour confirmer sans ambiguïté qu'une
+  // écriture a bien été durablement enregistrée côté serveur.
+  window.fbVerifyOnServer = async function(userId) {
+    try {
+      const snap = await getDocFromServer(AUTH_DOC);
+      const users = snap.exists() ? (snap.data().users || []) : [];
+      const found = users.find(u => u.id === userId);
+      return { ok: true, totalUsers: users.length, found: !!found, foundData: found || null };
+    } catch (e) {
+      return { ok: false, error: (e && e.message) ? e.message : String(e) };
     }
   };
 
@@ -2291,6 +2305,14 @@ async function doSignupSubmit(prenom, nom, matricule, magasin, role, tel, pass, 
     errEl.textContent = "🚫 La demande n'a pas pu être enregistrée (connexion instable). Veuillez réessayer.";
     errEl.style.display = 'block';
     return;
+  }
+
+  // DIAGNOSTIC TEMPORAIRE : vérifie et affiche ce que le serveur voit
+  // vraiment, pour comprendre pourquoi la demande ne s'affichait pas côté
+  // admin malgré une écriture qui semblait réussie.
+  if(window.fbVerifyOnServer) {
+    const verif = await window.fbVerifyOnServer(newUser.id);
+    alert('DIAGNOSTIC :\n' + JSON.stringify(verif, null, 2));
   }
 
   DB.users.push(newUser);
