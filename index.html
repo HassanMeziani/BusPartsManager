@@ -385,8 +385,6 @@
     <button class="btn btn-primary btn-block" style="margin-top:8px;padding:12px" onclick="doLogin()">Se connecter</button>
     <p style="text-align:center;margin-top:12px;font-size:12.5px"><button onclick="showForgotPassword()" style="background:none;border:none;color:var(--text3);cursor:pointer;text-decoration:underline">Mot de passe oublié ?</button></p>
     <p style="text-align:center;margin-top:16px;font-size:13px"><button onclick="showSignup()" style="background:none;border:none;color:var(--primary);cursor:pointer;font-weight:600;text-decoration:underline">Créer un compte</button></p>
-    <p style="text-align:center;margin-top:16px;font-size:12px;color:var(--text3)">Comptes démo : 00001/admin123 (admin) · 10001/mag123 (magasinier) · 20001/agent123 (agent)</p>
-    <p style="text-align:center;margin-top:8px"><button onclick="resetDB()" style="background:none;border:none;font-size:11px;color:var(--text3);cursor:pointer;text-decoration:underline">Réinitialiser les données</button></p>
   </div>
 
   <div class="auth-card" id="signup-view" style="display:none">
@@ -671,7 +669,7 @@
         <div class="topbar" id="catalog-toolbar" style="border:none;padding:12px 0;margin-bottom:16px;background:var(--bg);z-index:40;">
           <div class="search-bar" style="flex:1">
             <span>🔍</span>
-            <input type="text" placeholder="Rechercher par description, référence SAP, fournisseur, mots-clés..." oninput="filterArticles()" id="search-input">
+            <input type="text" placeholder="Rechercher par description, référence SAP, fournisseur, mots-clés..." oninput="debouncedFilterArticles()" id="search-input">
           </div>
           <div class="filter-bar" style="margin:0;gap:8px;">
             <select class="filter-select" id="filter-magasin" onchange="filterArticles()">
@@ -900,6 +898,16 @@
           </div>
           <div class="admin-section-body">
             <div id="users-list"></div>
+          </div>
+        </div>
+
+        <div class="admin-section" style="border:2px solid var(--danger)">
+          <div class="admin-section-header" style="background:var(--danger-light);color:var(--danger)">
+            ⚠️ Zone dangereuse
+          </div>
+          <div class="admin-section-body">
+            <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Cette action efface <strong>définitivement</strong> tout le catalogue, toutes les commandes et tous les comptes utilisateurs, sur tous les appareils connectés. Réservé aux situations exceptionnelles (ex : remise à zéro complète avant un nouveau déploiement).</p>
+            <button class="btn btn-outline" style="border-color:var(--danger);color:var(--danger)" onclick="resetDBProtected()">🗑️ Réinitialiser toutes les données</button>
           </div>
         </div>
       </div>
@@ -1682,47 +1690,6 @@
     }
   };
 
-  // DIAGNOSTIC : relit le document directement depuis le serveur Firestore,
-  // en ignorant tout cache local, pour confirmer sans ambiguïté qu'une
-  // écriture a bien été durablement enregistrée côté serveur.
-  window.fbVerifyOnServer = async function(userId) {
-    try {
-      const snap = await getDocFromServer(AUTH_DOC);
-      const users = snap.exists() ? (snap.data().users || []) : [];
-      const found = users.find(u => u.id === userId);
-      return { ok: true, totalUsers: users.length, found: !!found, foundData: found || null };
-    } catch (e) {
-      return { ok: false, error: (e && e.message) ? e.message : String(e) };
-    }
-  };
-
-  // DIAGNOSTIC : compare le tableau d'utilisateurs actuellement en mémoire
-  // dans ce navigateur (localUsers) avec une lecture forcée depuis le
-  // serveur (sans aucun cache), pour voir précisément où est la différence.
-  window.fbCompareLocalVsServer = async function(localUsers) {
-    try {
-      const snap = await getDocFromServer(AUTH_DOC);
-      const serverUsers = snap.exists() ? (snap.data().users || []) : [];
-      const localIds = new Set((localUsers || []).map(u => u.id));
-      const serverIds = new Set(serverUsers.map(u => u.id));
-      const onlyOnServer = serverUsers.filter(u => !localIds.has(u.id)).map(u => ({ id: u.id, matricule: u.matricule, name: u.name, statut: u.statut }));
-      const onlyLocal = (localUsers || []).filter(u => !serverIds.has(u.id)).map(u => ({ id: u.id, matricule: u.matricule, name: u.name, statut: u.statut }));
-      const serverPendingCount = serverUsers.filter(u => u.statut === 'en_attente').length;
-      const localPendingCount = (localUsers || []).filter(u => u.statut === 'en_attente').length;
-      return {
-        ok: true,
-        localTotal: (localUsers || []).length,
-        serverTotal: serverUsers.length,
-        localPendingCount,
-        serverPendingCount,
-        presentOnServerButNotLocal: onlyOnServer,
-        presentLocalButNotServer: onlyLocal
-      };
-    } catch (e) {
-      return { ok: false, error: (e && e.message) ? e.message : String(e) };
-    }
-  };
-
   // Ajout ciblé d'une notification dans le document complet, sans avoir
   // besoin de l'avoir déjà chargé — utilisé par l'écran d'inscription, avant
   // toute connexion (arrayUnion ajoute sans lire le reste du document).
@@ -2177,12 +2144,30 @@ function restoreCachedFullDataIfAny() {
   fullDataLoaded = true;
 }
 
-function resetDB() {
-  if(!confirm('Réinitialiser toutes les données sur TOUS les appareils connectés ? Les articles et commandes seront effacés définitivement.')) return;
+function resetDBProtected() {
+  if(!currentUser || currentUser.role !== 'admin') {
+    alert('🚫 Action réservée aux administrateurs.');
+    return;
+  }
+  const nbArticles = (DB.articles || []).length;
+  const confirmation = prompt(`⚠️ ATTENTION : ceci efface DÉFINITIVEMENT le catalogue actuel (${nbArticles} pièces), toutes les commandes, et remet les comptes utilisateurs à zéro (seul ton compte admin sera conservé), sur TOUS les appareils connectés.\n\nCette action est IRRÉVERSIBLE.\n\nPour confirmer, tape exactement : SUPPRIMER TOUT`);
+  if(confirmation !== 'SUPPRIMER TOUT') {
+    if(confirmation !== null) alert('Texte incorrect — réinitialisation annulée par sécurité.');
+    return;
+  }
+  // Reconstruit une base réellement vide (et non la copie actuelle en
+  // mémoire, qui contient les vraies données) — seul le compte admin
+  // actuellement connecté est conservé, pour ne pas se retrouver bloqué
+  // dehors après la réinitialisation.
+  const keepAdmin = { ...currentUser };
+  const emptyData = {
+    ...DB,
+    articles: [], orders: [], kits: [], tools: [], loans: [],
+    notifications: [], messages: [], activity: [], stockMovements: []
+  };
   localStorage.removeItem('bpm_db');
-  // Réinitialise aussi côté serveur pour que tous les appareils repartent à zéro
-  if(window.fbSaveData) window.fbSaveData(DB);
-  if(window.fbSaveAuthData) window.fbSaveAuthData({ users: DB.users, settings: DB.settings });
+  if(window.fbSaveData) window.fbSaveData(emptyData);
+  if(window.fbSaveAuthData) window.fbSaveAuthData({ users: [keepAdmin], settings: DB.settings });
   location.reload();
 }
 
@@ -2892,6 +2877,15 @@ function populateCategorieFilter() {
   if(!DB.settings.categories) DB.settings.categories = [];
   const current = sel.value;
   sel.innerHTML = '<option value="">Toutes catégories</option>' + DB.settings.categories.map(c=>`<option value="${c}"${c===current?' selected':''}>${c}</option>`).join('');
+}
+
+// Attend une courte pause dans la frappe avant de relancer le filtrage —
+// évite de recalculer/re-afficher sur les 2500+ pièces à chaque caractère
+// tapé, ce qui devenait sensible depuis que le catalogue a bien grossi.
+let filterArticlesDebounceTimer = null;
+function debouncedFilterArticles() {
+  clearTimeout(filterArticlesDebounceTimer);
+  filterArticlesDebounceTimer = setTimeout(filterArticles, 180);
 }
 
 function filterArticles() {
@@ -4250,6 +4244,7 @@ const PAGE_LABELS = {
   orders: '📦 Commandes',
   loansmgr: '🔑 Prêts outillage',
   deliveries: '✅ Livraisons',
+  journal: '📓 Journal préparation',
   notifications: '🔔 Notifications',
   messages: '💬 Messages',
   profile: '👤 Mon profil',
